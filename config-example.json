@@ -1,0 +1,27 @@
+{
+	"tables": [
+		"wp_(\\d+_)?affiliate_links",
+		"wp_(\\d+_)?comments",
+		"wp_(\\d+_)?commentmeta",
+		"wp_(\\d+_)?options",
+		"wp_(\\d+_)?postdetails",
+		"wp_(\\d+_)?postmeta",
+		"wp_(\\d+_)?posts",
+		"wp_(\\d+_)?term_relationships",
+		"wp_(\\d+_)?term_taxonomy",
+		"wp_(\\d+_)?terms",
+		"wp_(\\d+_)?usermeta",
+		"wp_(\\d+_)?users"
+	],
+	"parsers": {
+		"wp_(\\d+_)?postmeta": {
+			"meta_value": ["json", "phps"]
+		},
+		"wp_(\\d+_)?usermeta": {
+			"meta_value": ["json", "phps"]
+		},
+		"wp_(\\d+_)?termmeta": {
+			"meta_value": ["json", "phps"]
+		}
+	}
+}
