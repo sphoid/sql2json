@@ -351,6 +351,8 @@ def parse_sql_file(filename):
 	if re.match(r'^gs://.*', filename):
 		fs = get_gcs_fs()
 
+		print("Reading from gcsfs: " + filename)
+
 		with fs.open(filename, 'rt') as cf:
 			if re.match(r'.*\.gz$', filename):
 				with gzip.open(cf, 'rt') as f:
@@ -360,6 +362,8 @@ def parse_sql_file(filename):
 				for line in cf:
 					process_line(line)
 	else:
+		print("Reading from local fs: " + filename)
+
 		if re.match(r'.*\.gz$', filename):
 			with gzip.open(filename, 'rt') as f:
 				for line in f:
