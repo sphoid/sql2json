@@ -1,4 +1,5 @@
 import os, sys, json, re, threading, time, queue, argparse, gzip
+import gcsfs
 import phpserialize as php_s
 from sql_metadata import Parser
 
@@ -29,6 +30,11 @@ parsers = None
 # input sql file path
 sql_file_path = None
 
+# google cloud storage project
+gcs_project = None
+
+# google cloud storage credentials file path
+# gcs_credentials = None
 
 # parse json config
 def parse_config(config):
@@ -51,7 +57,7 @@ def parse_config(config):
 
 # parse command line arguments
 def parse_args():
-	global sql_file_path, output_dir, tables, flush_batch_size, queue_timeout
+	global sql_file_path, output_dir, tables, flush_batch_size, queue_timeout, gcs_project, gcs_credentials
 
 	args_parser = argparse.ArgumentParser(prog='sql2json', description='Convert sql dump to json')
 	args_parser.add_argument('--config', help='Config file path', default=None)
@@ -59,6 +65,8 @@ def parse_args():
 	args_parser.add_argument('--tables', help='Comma separated list of tables to export', default=None)
 	args_parser.add_argument('--flush_batch_size', help='minimum number of records to queue up before flushing to file', default=None, type=int)
 	args_parser.add_argument('--queue_timeout', help='maximum time to wait for new statement to be available', default=None, type=int)
+	args_parser.add_argument('--gcs_project', help='Google Cloud Storage project', default=None)
+	# args_parser.add_argument('--gcs_credentials', help='Google Cloud Storage credentials file path', default=None)
 	args_parser.add_argument('sql_file_path', help='SQL file path')
 
 	args = args_parser.parse_args()
@@ -85,6 +93,12 @@ def parse_args():
 	if args.queue_timeout:
 		queue_timeout = args.queue_timeout
 
+	if args.gcs_project:
+		gcs_project = args.gcs_project
+
+	# if args.gcs_credentials:
+	# 	gcs_credentials = args.gcs_credentials
+
 # get existing queue or create new one for table
 def get_table_queue(table):
 	if table in queues:
@@ -108,7 +122,11 @@ def match_table(table):
 
 # parse sql statement
 def parse_statement(insert_sql):
-	return Parser(insert_sql)
+	try:
+		return Parser(insert_sql)
+	except:
+		print('Error parsing statement: ' + insert_sql)
+		return None
 
 # chunk a list
 def chunk(l, size):
@@ -188,7 +206,12 @@ def parse_records(table, columns, value_groups):
 		record = {}
 		for i in range(columns_count):
 			column_name = columns[i]
-			column_value = vg[i]
+
+			try:
+				column_value = vg[i]
+			except IndexError:
+				column_value = None
+				print("WARNING: missing column value. table=" + table + " column=" + column_name + "values=" + str(vg))
 
 			if parsers and column_name in parsers and isinstance(column_value, str):
 				column_parsers = parsers[column_name]
@@ -299,7 +322,14 @@ def process_line(line):
 	# only parse INSERT statements
 	if line.startswith('INSERT INTO'):
 		statement = parse_statement(line.strip())
-		table = statement.tables[0]
+		if statement == None:
+			return
+
+		try:
+			table = statement.tables[0]
+		except:
+			print('Error reading parsed statement: ' + line)
+			return
 
 		if not match_table(table):
 			return
@@ -313,16 +343,31 @@ def process_line(line):
 		# add parsed statement to queue to be processed by the worker thread for that table
 		q.put(statement)
 
+def get_gcs_fs():
+	return gcsfs.GCSFileSystem(project=gcs_project)
+
 # process sql file line by line
 def parse_sql_file(filename):
-	if re.match(r'.*\.gz$', filename):
-		with gzip.open(filename, 'rt') as f:
-			for line in f:
-				process_line(line)
+	if re.match(r'^gs://.*', filename):
+		fs = get_gcs_fs()
+
+		with fs.open(filename, 'rt') as cf:
+			if re.match(r'.*\.gz$', filename):
+				with gzip.open(cf, 'rt') as f:
+					for line in f:
+						process_line(line)
+			else:
+				for line in cf:
+					process_line(line)
 	else:
-		with open(filename, 'rt') as f:
-			for line in f:
-				process_line(line)
+		if re.match(r'.*\.gz$', filename):
+			with gzip.open(filename, 'rt') as f:
+				for line in f:
+					process_line(line)
+		else:
+			with open(filename, 'rt') as f:
+				for line in f:
+					process_line(line)
 
 	print("Waiting for threads to finish...")
 
